@@ -2039,11 +2039,14 @@ function defaultState(){
     veiligheidsImgs:[]
   };
 }
-let state = load() || seedData();
+let state = seedData();  // voorlopige fallback; echte data wordt async uit IndexedDB geladen bij startup
 
-/* ---------- persistentie ---------- */
-function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){ toast('Opslaan mislukt (opslag vol?)'); } }
-function load(){ try{ const r=localStorage.getItem(LS_KEY); return r?JSON.parse(r):null; }catch(e){ return null; } }
+/* ---------- persistentie via IndexedDB (grote opslag: afbeeldingen blijven bewaard) ---------- */
+let _dbp=null;
+function _db(){ if(_dbp) return _dbp; _dbp=new Promise((res,rej)=>{ try{ if(typeof indexedDB==='undefined'){ rej(new Error('no idb')); return; } const r=indexedDB.open('grensrock_db',1); r.onupgradeneeded=()=>{ try{ r.result.createObjectStore('kv'); }catch(e){} }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }catch(e){ rej(e); } }); _dbp.catch(()=>{ _dbp=null; }); return _dbp; }
+async function idbGet(k){ try{ const d=await _db(); return await new Promise(res=>{ const t=d.transaction('kv','readonly').objectStore('kv').get(k); t.onsuccess=()=>res(t.result); t.onerror=()=>res(undefined); }); }catch(e){ return undefined; } }
+async function idbSet(k,v){ try{ const d=await _db(); await new Promise(res=>{ const tx=d.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); return true; }catch(e){ return false; } }
+function save(){ idbSet(LS_KEY, JSON.parse(JSON.stringify(state))).then(ok=>{ if(!ok){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){ toast('Opslaan mislukt (opslag vol?)'); } } }); }
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2933,7 +2936,7 @@ const SVG={
 
 /* ===================== START ===================== */
 $('#ed').addEventListener('change',e=>{ state.editie=e.target.value.trim(); save(); });
-initSeq(); save();
+initSeq();
 function applyTheme(t){ document.body.classList.toggle('light', t==='light'); const b=document.getElementById('themebtn'); if(b) b.textContent=(t==='light')?'☀︎':'☾'; }
 function toggleTheme(){ const nx=document.body.classList.contains('light')?'dark':'light'; try{localStorage.setItem('gr_editor_theme',nx);}catch(e){} applyTheme(nx); }
 (function(){ let t='dark'; try{ t=localStorage.getItem('gr_editor_theme')||'dark'; }catch(e){} applyTheme(t); })();
@@ -2948,7 +2951,15 @@ document.addEventListener('keydown',function(e){
   }
 });
 history.replaceState({tab:activeTab},'');
-renderTabs(); render();
+(async function(){
+  let saved = await idbGet(LS_KEY);
+  if(!saved){
+    try{ const r=localStorage.getItem(LS_KEY); if(r){ saved=JSON.parse(r); await idbSet(LS_KEY, saved); } }catch(e){}
+  }
+  if(saved && saved.acties){ state=Object.assign(defaultState(), saved); }
+  initSeq(); save();
+  renderTabs(); render(); checkAuth();
+})();
 
 </script>
 </body>
