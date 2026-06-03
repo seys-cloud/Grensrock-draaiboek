@@ -209,6 +209,7 @@ table.matrix.aw-table th{min-width:34px}
     <div class="toolbtns">
       <button class="btn" onclick="doExport()" title="Bewaar als bestand om te delen">&#8595; Exporteren</button>
       <button class="btn" onclick="document.getElementById('importfile').click()" title="Laad een gedeeld bestand">&#8593; Importeren</button>
+      <button class="btn primary sm" onclick="saveEditorFile()" title="Bewaar alle wijzigingen in een nieuw editor.html om te pushen">💾 Bewaar</button>
       <button class="btn sm" id="themebtn" onclick="toggleTheme()" title="Licht / donker thema">☾</button>
       <button class="btn cyan sm" onclick="makeSharePage()" title="Genereer een mobiele, alleen-lezen deelpagina">↗ Deelpagina</button>
       <button class="btn danger sm" onclick="resetAll()">Wissen</button>
@@ -257,7 +258,7 @@ Algemene verantwoordelijkheid
 • Werk steeds met respect voor materiaal, terrein en collega's.
 • Veiligheid gaat altijd boven snelheid of efficiëntie.`;
 
-const SEED_DATA = {
+/*SEED_START*/const SEED_DATA = {
  "editie": "2026",
  "bands": [
   {
@@ -1997,12 +1998,10 @@ const SEED_DATA = {
  ]
 };
 
+/*SEED_END*/
 function seedData(){
-  const s = defaultState();
   const d = JSON.parse(JSON.stringify(SEED_DATA));
-  s.editie=d.editie||"2026"; s.bands=d.bands||[]; s.medewerkers=d.medewerkers||[];
-  s.leveranciers=d.leveranciers||[]; s.acties=d.acties||[];
-  return s;
+  return Object.assign(defaultState(), d);
 }
 
 
@@ -2644,6 +2643,24 @@ function resetAll(){
 }
 
 /* ===================== DEELPAGINA (mobiel, alleen-lezen) ===================== */
+function saveEditorFile(){
+  state.editie=$('#ed').value.trim(); save();
+  // kloon het document en maak dynamische delen leeg (worden bij laden opnieuw opgebouwd)
+  const root=document.documentElement.cloneNode(true);
+  ['#main','#modalmount','#printroot','#pdfsrc'].forEach(sel=>{ const el=root.querySelector(sel); if(el) el.innerHTML=''; });
+  // bak de huidige gegevens in als nieuwe SEED_DATA
+  const scripts=[...root.querySelectorAll('script')];
+  const appScript=scripts.find(sc=>sc.textContent.indexOf('/*SEED_START*/')>=0);
+  if(!appScript){ toast('Kon SEED-blok niet vinden'); return; }
+  let json=JSON.stringify(state).replace(/<\//g,'<\\/');  // beveilig tegen voortijdig sluiten van de scripttag
+  appScript.textContent = appScript.textContent.replace(/\/\*SEED_START\*\/[\s\S]*?\/\*SEED_END\*\//, '/*SEED_START*/const SEED_DATA = '+json+';/*SEED_END*/');
+  const html='<!DOCTYPE html>\n'+root.outerHTML;
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='editor.html'; a.click();
+  URL.revokeObjectURL(a.href);
+  toast('editor.html bewaard — plaats in je repo en push');
+}
 function makeSharePage(){
   state.editie=$('#ed').value.trim(); save();
   const ed=esc(state.editie||'');
