@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Grensrock Draaiboek</title>
+<meta name="theme-color" content="#ff2bd6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Draaiboek">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<style>
+*{box-sizing:border-box}html,body{margin:0}
+body{min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:#fff;background:radial-gradient(120% 90% at 82% -8%,#ff2bd6 0%,rgba(255,43,214,0) 42%),
+  radial-gradient(120% 90% at -8% 108%,#34d6ff 0%,rgba(52,214,255,0) 42%),linear-gradient(135deg,#0c0c0e,#1a0a18 55%,#0c0c0e);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 18px;text-align:center}
+img.logo{width:140px;max-width:55%;filter:invert(1)}
+.kick{margin-top:14px;font-size:12px;letter-spacing:.32em;text-transform:uppercase;font-weight:800;color:#b6ff1a}
+h1{font-size:40px;font-weight:900;text-transform:uppercase;margin:6px 0 4px;letter-spacing:-.02em}
+p.sub{color:#cfcfd6;font-size:14px;margin:0 0 26px}
+.cards{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;width:100%;max-width:720px}
+a.card{flex:1 1 280px;text-decoration:none;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);
+  border-radius:16px;padding:22px;transition:.15s;backdrop-filter:blur(4px)}
+a.card:hover{border-color:#ff2bd6;background:rgba(255,43,214,.12);transform:translateY(-2px)}
+a.card .ic{font-size:30px}
+a.card h2{font-size:19px;font-weight:900;margin:8px 0 6px;text-transform:uppercase}
+a.card span{color:#cfcfd6;font-size:13px;line-height:1.4}
+.foot{margin-top:26px;color:#888;font-size:11px}
+</style>
+</head>
+<body>
+  <img class="logo" src="icon-512.png" alt="Grensrock">
+  <div class="kick">Gratis muziekfestival · Menen</div>
+  <h1>Draaiboek</h1>
+  <p class="sub">Kies hieronder wat je wil openen.</p>
+  <div class="cards">
+    <a class="card" href="mobiel.html">
+      <div class="ic">📱</div>
+      <h2>Raadplegen</h2>
+      <span>Mobiele, alleen-lezen versie: alle acties chronologisch + filterbare tabel. Ideaal op je telefoon.</span>
+    </a>
+    <a class="card" href="editor.html">
+      <div class="ic">✏️</div>
+      <h2>Bewerken</h2>
+      <span>Volledige editor om het draaiboek op te bouwen, te exporteren en de PDF te maken.</span>
+    </a>
+  </div>
+  <div class="foot">Grensrock · Draaiboek — gehost via GitHub Pages</div>
+<script>
+if('serviceWorker' in navigator){ window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
+</script>
+</body>
+</html>
