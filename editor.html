@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
@@ -2673,7 +2673,7 @@ function makeSharePage(){
     if(a.dag!==cur){ cur=a.dag; prev+=`<h3 class="d">${esc(dagKort(a.dag))}</h3>`; }
     const l=levById(a.leverancierId)||{}; const ev=effVerantw(a); const ci=dagIndex(a.dag); const col=ci>=0?DAGKLEUR[ci]:'#bbb';
     const loc=[a.locLeveren?('Leveren: '+a.locLeveren):'',a.locAfhalen?('Afhalen: '+a.locAfhalen):''].filter(Boolean).join(' · ');
-    prev+=`<div class="c">
+    prev+=`<div class="c" id="act-${a.id}">
       <div class="ch"><span class="b" style="background:${col}">${esc(dagKort(a.dag))}</span><span class="t">${esc(a.datum||'')} · ${esc(a.tijdstip||'')}</span></div>
       <div class="h">${esc(l.onderwerp||'')} <span class="f">· ${esc(l.firma||'')}</span></div>
       <div class="m">${ev?'👤 '+esc(ev.naam):''}${loc?(ev?' · ':'')+esc(loc):''}</div>
@@ -2689,7 +2689,7 @@ function makeSharePage(){
     const vid=l.verantwoordelijkeId||'';
     const vids=[...rowVerantwIds(l)].join(' ');
     const dlist=days.filter(d=>state.acties.some(a=>a.leverancierId===l.id&&a.dag===d)).join('|');
-    const cells=days.map(d=>{const i=dagIndex(d);const n=state.acties.filter(a=>a.leverancierId===l.id&&a.dag===d).length;return `<td data-d="${esc(d)}" ${n?`class="fill" style="background:${DAGKLEUR[i]}"`:''}>${n||''}</td>`;}).join('');
+    const cells=days.map(d=>{const i=dagIndex(d);const da=state.acties.filter(a=>a.leverancierId===l.id&&a.dag===d).sort(cmpActie);const n=da.length;return `<td data-d="${esc(d)}" ${n?`class="fill" style="background:${DAGKLEUR[i]};cursor:pointer" onclick="jumpToPreview('${da[0].id}')"`:''}>${n||''}</td>`;}).join('');
     return `<tr data-ond="${esc(l.id)}" data-firma="${esc((l.firma||'').toLowerCase())}" data-verantw="${esc(vids)}" data-days="${esc(dlist)}">
       <td class="ond">${esc(l.onderwerp||'')}</td><td class="lev">${esc(l.firma||'')}</td><td class="ver">${esc(mwNaam(vid)||'—')}</td>${cells}</tr>`;
   }).join('');
@@ -2706,6 +2706,7 @@ function makeSharePage(){
   const FILTERJS = "(function(){"+"try{var T=localStorage.getItem('gr_theme');if(T==='dark')document.body.classList.add('dark');}catch(e){}"+"var tb=document.getElementById('themebtn');function syncIcon(){if(tb)tb.textContent=document.body.classList.contains('dark')?'\u2600\ufe0f':'\ud83c\udf19';}syncIcon();"+"if(tb)tb.addEventListener('click',function(){document.body.classList.toggle('dark');try{localStorage.setItem('gr_theme',document.body.classList.contains('dark')?'dark':'light');}catch(e){}syncIcon();});"
    +"var tabs=document.querySelectorAll('.tabbtn');var secs={preview:document.getElementById('s-preview'),tabel:document.getElementById('s-tabel')};"
    +"tabs.forEach(function(b){b.addEventListener('click',function(){tabs.forEach(function(x){x.classList.remove('on')});b.classList.add('on');for(var k in secs){secs[k].style.display=(k===b.dataset.tab)?'':'none';}window.scrollTo(0,0);});});"
+   +"window.jumpToPreview=function(actId){tabs.forEach(function(x){x.classList.remove('on')});var pb=document.querySelector('.tabbtn[data-tab=\"preview\"]');if(pb)pb.classList.add('on');secs.preview.style.display='';secs.tabel.style.display='none';var el=document.getElementById('act-'+actId);if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.classList.add('flash');setTimeout(function(){el.classList.remove('flash');},1700);}else{window.scrollTo(0,0);}};"
    +"function f(id){return document.getElementById(id);}"
    +"function apply(){var fo=f('f-ond').value,ff=f('f-firma').value,fv=f('f-ver').value,fd=f('f-dag').value;"
    +"document.querySelectorAll('#tbl tbody tr').forEach(function(tr){var ok=true;"
@@ -2729,6 +2730,8 @@ function makeSharePage(){
    +"main{max-width:760px;margin:0 auto;padding:14px}"
    +"h3.d{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin:18px 0 8px;border-bottom:1px solid var(--line);padding-bottom:5px}h3.d:first-child{margin-top:0}"
    +".c{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}"
+   +"@keyframes fla{0%,40%{box-shadow:0 0 0 4px var(--accent);background:rgba(215,22,143,.1)}100%{box-shadow:none;background:none}}"
+   +".c.flash{animation:fla 1.7s ease}"
    +".c .ch{display:flex;align-items:center;gap:8px;margin-bottom:6px}"
    +".c .b{font-weight:800;font-size:12px;padding:3px 9px;border-radius:6px;color:#12001c}"
    +".c .t{color:var(--muted);font-size:12.5px;font-weight:600}"
