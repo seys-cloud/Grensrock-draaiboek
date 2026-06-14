@@ -853,14 +853,14 @@ function viewPlattegrond(){
   .pg-head h2{margin:0 0 2px}
   .pg-toolbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:10px 0}
   .pg-tools{display:flex;gap:4px}
-  .pg-tb{background:#1b1b20;border:1px solid #34343c;color:var(--muted);font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer}
+  .pg-tb{background:var(--panel);border:1px solid var(--line);color:var(--muted);font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer}
   .pg-tb.on{background:var(--magenta);color:#fff;border-color:transparent}
   .pg-actsel{display:flex;gap:6px;align-items:center}.pg-actsel select{min-width:240px}
   .pg-chk{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13px}
   .pg-scrub{display:flex;gap:10px;align-items:center;margin:6px 0 12px}
   .pg-scrub input[type=range]{flex:1;max-width:560px}
   .pg-scrublbl{font-weight:700;min-width:200px}
-  .pg-stage{background:#0e0e11;border:1px solid #34343c;border-radius:12px;padding:10px;overflow:auto}
+  .pg-stage{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;overflow:auto}
   .pg-imgwrap{position:relative;display:inline-block;max-width:100%;line-height:0}
   .pg-imgwrap img{display:block;width:100%;max-width:1100px;height:auto;-webkit-user-select:none;user-select:none}
   .pg-overlay{position:absolute;inset:0;cursor:crosshair}
@@ -884,9 +884,9 @@ function viewPlattegrond(){
   .pg-rot::after{content:"";position:absolute;left:50%;top:13px;width:2px;height:11px;background:#fff;transform:translateX(-50%)}
   .pg-ghost{position:absolute;border:2px dashed #fff;background:rgba(255,255,255,.15)}
   .pg-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
-  .pg-panel{background:#16161a;border:1px solid #34343c;border-radius:12px;padding:14px}
+  .pg-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .pg-panel h3{margin:0 0 8px}
-  .pg-li{display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .pg-li{display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line)}
   .pg-li.sel{background:rgba(255,43,214,.12);border-radius:6px}
   .pg-li-txt{flex:1;font-size:13px}
   .pg-dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;border:1px solid rgba(255,255,255,.4)}
