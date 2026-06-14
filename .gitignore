@@ -1,0 +1,5 @@
+# Backups & tijdelijke reconstructies — nooit mee pushen
+*.backup-*.html
+*.rebuilt.html
+*~
+.DS_Store

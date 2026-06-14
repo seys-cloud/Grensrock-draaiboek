@@ -290,6 +290,25 @@ const DAGKLEUR = ["#34d6ff","#27e06a","#b6ff1a","#f2ff1a","#ffd11a","#ff9a1f",
                   "#ff5a1f","#ff2bd6","#c850ff","#7d8cff","#34d6ff","#27e06a"];
 const dagIndex = d => DAGEN.indexOf(d);
 
+/* Standaard leveranciertypes (kleur per type) — bewerkbaar via tab Plattegrond */
+const DEFAULT_LEVTYPES = [
+  {id:'podium',   naam:'Podium & techniek', kleur:'#ff2bd6'},
+  {id:'catering', naam:'Catering & bar',     kleur:'#ff9a1f'},
+  {id:'sanitair', naam:'Sanitair',           kleur:'#34d6ff'},
+  {id:'security', naam:'Security & stewards', kleur:'#f2ff1a'},
+  {id:'logistiek',naam:'Logistiek & transport',kleur:'#27e06a'},
+  {id:'nuts',     naam:'Nutsvoorzieningen (water/stroom)', kleur:'#7d8cff'},
+  {id:'deco',     naam:'Deco & signalisatie', kleur:'#c850ff'}
+];
+const PLATTEGROND_IMG = 'plattegrond.jpg';
+function levTypes(){ return state.leverancierTypes && state.leverancierTypes.length ? state.leverancierTypes : DEFAULT_LEVTYPES; }
+function typeById(tid){ return levTypes().find(t=>t.id===tid); }
+function markerKleur(actieId){
+  const a=(state.acties||[]).find(x=>x.id===actieId); if(!a) return '#9aa0a6';
+  const l=levById(a.leverancierId); if(!l||!l.type) return '#9aa0a6';
+  const t=typeById(l.type); return t?t.kleur:'#9aa0a6';
+}
+
 const LS_KEY = 'grensrock_draaiboek_v1';
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
@@ -304,7 +323,9 @@ function defaultState(){
     medewerkers:[],
     acties:[],
     aanwezig:{},
-    veiligheidsImgs:[]
+    veiligheidsImgs:[],
+    leverancierTypes: DEFAULT_LEVTYPES.map(t=>({...t})),
+    plattegrond:[]
   };
 }
 let state = defaultState();  // voorlopige fallback; echte data wordt async uit IndexedDB geladen bij startup
@@ -322,12 +343,15 @@ let userEmail='';
 const SECTIES=['meta','bands','leveranciers','medewerkers','acties','aanwezig','veiligheidsImgs'];
 let secVer={}, lastPushed={};
 function stateToSectie(s){
-  if(s==='meta') return {editie:state.editie||'',voorwoord:state.voorwoord||'',veiligheidsNote:state.veiligheidsNote||''};
+  if(s==='meta') return {editie:state.editie||'',voorwoord:state.voorwoord||'',veiligheidsNote:state.veiligheidsNote||'',
+    leverancierTypes:state.leverancierTypes||DEFAULT_LEVTYPES.map(t=>({...t})), plattegrond:state.plattegrond||[]};
   return state[s];
 }
 function sectieToState(s,d){
   if(d==null) return;
-  if(s==='meta'){ state.editie=d.editie||''; state.voorwoord=d.voorwoord||''; state.veiligheidsNote=d.veiligheidsNote||''; }
+  if(s==='meta'){ state.editie=d.editie||''; state.voorwoord=d.voorwoord||''; state.veiligheidsNote=d.veiligheidsNote||'';
+    if(Array.isArray(d.leverancierTypes)&&d.leverancierTypes.length) state.leverancierTypes=d.leverancierTypes;
+    if(Array.isArray(d.plattegrond)) state.plattegrond=d.plattegrond; }
   else state[s]=d;
 }
 function setSync(st){
@@ -447,6 +471,7 @@ function toggleAanwezig(mwId,dag){ state.aanwezig=state.aanwezig||{}; const o=st
 const TABS = [
   {id:'opbouw', label:'Leveranciers & acties'},
   {id:'medewerkers', label:'Medewerkers'},
+  {id:'plattegrond', label:'Plattegrond'},
   {id:'resultaat', label:'Resultaat (tabel)'},
   {id:'programma', label:'Programma & teksten'},
   {id:'preview', label:'Preview'},
@@ -474,6 +499,7 @@ function render(){
   const m=$('#main');
   if(activeTab==='opbouw') m.innerHTML=viewOpbouw();
   else if(activeTab==='medewerkers') m.innerHTML=viewMedewerkers();
+  else if(activeTab==='plattegrond'){ m.innerHTML=viewPlattegrond(); initPlattegrond(); }
   else if(activeTab==='resultaat') m.innerHTML=viewResultaat();
   else if(activeTab==='programma') m.innerHTML=viewProgramma();
   else if(activeTab==='preview') m.innerHTML=viewPreview();
@@ -782,10 +808,220 @@ function viewPdf(){
 function openModal(html){ $('#modalmount').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`; }
 function closeModal(){ $('#modalmount').innerHTML=''; if(_needRender){ _needRender=false; render(); } }
 
+/* ===================== VIEW: PLATTEGROND (interactieve opbouw-kaart) ===================== */
+let pgTool='select', pgActieSel='', pgScrub=-1, pgShowLabels=true, pgSel=null;
+function pgEnsureTypes(){ if(!state.leverancierTypes||!state.leverancierTypes.length) state.leverancierTypes=DEFAULT_LEVTYPES.map(t=>({...t})); return state.leverancierTypes; }
+function pgActieLabel(a){
+  if(!a) return '— onbekende actie —';
+  const l=levById(a.leverancierId);
+  return (dagKort(a.dag)||'?')+(a.tijdstip?' '+a.tijdstip:'')+' · '+(l?(l.onderwerp||l.firma||'leverancier'):'leverancier');
+}
+function markerActies(){
+  const ids=[...new Set((state.plattegrond||[]).map(m=>m.actieId))];
+  return ids.map(id=>(state.acties||[]).find(a=>a.id===id)).filter(Boolean).sort(cmpActie);
+}
+function pgNorm(e,ov){ const r=ov.getBoundingClientRect(); return {x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)), y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))}; }
+
+function viewPlattegrond(){
+  const acts=sortedActies();
+  const actOpts='<option value="">— kies een actie —</option>'+acts.map(a=>`<option value="${a.id}" ${pgActieSel===a.id?'selected':''}>${esc(pgActieLabel(a))}</option>`).join('');
+  const MA=markerActies();
+  const scrubMax=MA.length;
+  if(pgScrub<0||pgScrub>scrubMax) pgScrub=scrubMax;
+  const curLabel = pgScrub>=scrubMax ? 'Alles tonen' : (pgScrub+1)+'/'+scrubMax+' · '+esc(pgActieLabel(MA[pgScrub]));
+  const typesHtml = pgEnsureTypes().map(t=>`
+    <div class="pg-type">
+      <input type="color" value="${t.kleur}" oninput="pgTypeColor('${t.id}',this.value)">
+      <input type="text" value="${esc(t.naam)}" onchange="pgTypeName('${t.id}',this.value)">
+      <button class="btn sm ghost" onclick="pgDelType('${t.id}')" title="Type verwijderen">×</button>
+    </div>`).join('');
+  const markers=(state.plattegrond||[]);
+  const listHtml = markers.length? markers.map(m=>{
+      const a=(state.acties||[]).find(x=>x.id===m.actieId);
+      const kl=markerKleur(m.actieId);
+      return `<div class="pg-li ${pgSel===m.id?'sel':''}">
+        <span class="pg-dot" style="background:${kl}"></span>
+        <span class="pg-li-txt">${a?esc(pgActieLabel(a)):'<i>verweesde marker</i>'} <span class="muted">(${m.vorm==='rect'?'zone':'pin'})</span></span>
+        <button class="btn sm ghost" onclick="pgSelectMarker('${m.id}')">Toon</button>
+        <button class="btn sm ghost" onclick="pgDelMarker('${m.id}')">×</button>
+      </div>`;
+    }).join('') : '<div class="muted" style="padding:6px 2px">Nog geen markers. Kies een actie, kies Pin of Zone, en klik/sleep op de plattegrond.</div>';
+
+  return `
+  <style>
+  .pg-wrap{max-width:1500px;margin:0 auto;padding:0 26px 40px}
+  .pg-head h2{margin:0 0 2px}
+  .pg-toolbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .pg-tools{display:flex;gap:4px}
+  .pg-tb{background:#1b1b20;border:1px solid #34343c;color:var(--muted);font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer}
+  .pg-tb.on{background:var(--magenta);color:#fff;border-color:transparent}
+  .pg-actsel{display:flex;gap:6px;align-items:center}.pg-actsel select{min-width:240px}
+  .pg-chk{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13px}
+  .pg-scrub{display:flex;gap:10px;align-items:center;margin:6px 0 12px}
+  .pg-scrub input[type=range]{flex:1;max-width:560px}
+  .pg-scrublbl{font-weight:700;min-width:200px}
+  .pg-stage{background:#0e0e11;border:1px solid #34343c;border-radius:12px;padding:10px;overflow:auto}
+  .pg-imgwrap{position:relative;display:inline-block;max-width:100%;line-height:0}
+  .pg-imgwrap img{display:block;width:100%;max-width:1100px;height:auto;-webkit-user-select:none;user-select:none}
+  .pg-overlay{position:absolute;inset:0;cursor:crosshair}
+  .pg-overlay.sel{cursor:default}
+  .pg-m{position:absolute}
+  .pg-pin{transform:translate(-50%,-50%);cursor:move}
+  .pg-dot{display:block;width:16px;height:16px;border-radius:50%;background:var(--c);border:2px solid rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.55);box-sizing:border-box}
+  .pg-pin.hi .pg-dot{box-shadow:0 0 0 3px #fff;transform:scale(1.25)}
+  .pg-pin.sel .pg-dot{box-shadow:0 0 0 2px #fff}
+  .pg-rect{border:2px solid var(--c);cursor:move;border-radius:3px;transform-origin:center center;box-sizing:border-box}
+  .pg-rect.hi{box-shadow:0 0 0 2px #fff inset;z-index:5}
+  .pg-m.dim{opacity:.5;filter:grayscale(1)}
+  .pg-rect.sel{outline:2px dashed #fff;outline-offset:1px;z-index:6}
+  .pg-mlbl{font-size:11px;font-weight:700;color:#fff;background:rgba(0,0,0,.62);padding:1px 5px;border-radius:4px;white-space:nowrap;line-height:1.25}
+  .pg-pin .pg-mlbl{position:absolute;left:50%;top:13px;transform:translateX(-50%)}
+  .pg-rect .pg-mlbl{position:absolute;top:2px;left:2px}
+  .pg-handle{position:absolute;width:14px;height:14px;background:#fff;border:2px solid var(--magenta);border-radius:50%;box-sizing:border-box;display:none;z-index:7}
+  .pg-rect.sel .pg-handle{display:block}
+  .pg-rs{right:-7px;bottom:-7px;cursor:nwse-resize}
+  .pg-rot{left:50%;top:-24px;margin-left:-7px;cursor:grab}
+  .pg-rot::after{content:"";position:absolute;left:50%;top:13px;width:2px;height:11px;background:#fff;transform:translateX(-50%)}
+  .pg-ghost{position:absolute;border:2px dashed #fff;background:rgba(255,255,255,.15)}
+  .pg-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
+  .pg-panel{background:#16161a;border:1px solid #34343c;border-radius:12px;padding:14px}
+  .pg-panel h3{margin:0 0 8px}
+  .pg-li{display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .pg-li.sel{background:rgba(255,43,214,.12);border-radius:6px}
+  .pg-li-txt{flex:1;font-size:13px}
+  .pg-dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;border:1px solid rgba(255,255,255,.4)}
+  .pg-type{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .pg-type input[type=text]{flex:1}
+  @media(max-width:800px){.pg-cols{grid-template-columns:1fr}}
+  </style>
+  <div class="pg-wrap">
+    <div class="pg-head">
+      <h2>Plattegrond</h2>
+      <p class="muted">Wijs acties toe aan een plek op het terrein. Kies een actie, kies <b>Pin</b> (punt) of <b>Zone</b> (sleep een rechthoek), en plaats hem op de kaart. De kleur volgt het <b>type</b> van de leverancier. Met de <b>filmschuif</b> speel je de op- en afbouw chronologisch af.</p>
+    </div>
+    <div class="pg-toolbar">
+      <div class="pg-tools">
+        <button class="pg-tb ${pgTool==='select'?'on':''}" onclick="pgSetTool('select')">▥ Selecteren</button>
+        <button class="pg-tb ${pgTool==='pin'?'on':''}" onclick="pgSetTool('pin')">📍 Pin</button>
+        <button class="pg-tb ${pgTool==='rect'?'on':''}" onclick="pgSetTool('rect')">▭ Zone</button>
+      </div>
+      <div class="pg-actsel"><label>Actie:</label><select onchange="pgActieSel=this.value">${actOpts}</select></div>
+      <label class="pg-chk"><input type="checkbox" ${pgShowLabels?'checked':''} onchange="pgShowLabels=this.checked;paintMarkers()"> Etiketten</label>
+    </div>
+    <div class="pg-scrub">
+      <span class="muted">🎬 Film:</span>
+      <input type="range" min="0" max="${scrubMax}" value="${pgScrub}" oninput="pgOnScrub(this.value)">
+      <span id="pg-scrublbl" class="pg-scrublbl">${curLabel}</span>
+    </div>
+    <div class="pg-stage">
+      <div class="pg-imgwrap" id="pg-imgwrap">
+        <img id="pg-img" src="${PLATTEGROND_IMG}" alt="Plattegrond" draggable="false">
+        <div id="pg-overlay" class="pg-overlay"></div>
+      </div>
+    </div>
+    <div class="pg-cols">
+      <div class="pg-panel"><h3>Markers (${markers.length})</h3>${listHtml}</div>
+      <div class="pg-panel"><h3>Types &amp; kleuren</h3>${typesHtml}<button class="btn sm" onclick="pgAddType()">+ Type toevoegen</button></div>
+    </div>
+  </div>`;
+}
+function initPlattegrond(){
+  const img=document.getElementById('pg-img'); const ov=document.getElementById('pg-overlay');
+  if(!img||!ov) return;
+  ov.className='pg-overlay'+(pgTool==='select'?' sel':'');
+  ov.onmousedown=pgStageDown;
+  if(img.complete) paintMarkers(); else img.addEventListener('load',()=>paintMarkers(),{once:true});
+}
+function pgRgba(hex,a){ hex=(hex||'').replace('#',''); if(hex.length===3) hex=hex.split('').map(c=>c+c).join(''); const n=parseInt(hex,16); if(isNaN(n)) return 'rgba(154,160,166,'+a+')'; return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
+function paintMarkers(){
+  const ov=document.getElementById('pg-overlay'); if(!ov) return;
+  const MA=markerActies();
+  const k=(pgScrub<0||pgScrub>=MA.length)?MA.length:pgScrub;
+  ov.innerHTML=(state.plattegrond||[]).map(m=>{
+    const a=(state.acties||[]).find(x=>x.id===m.actieId); if(!a) return '';
+    const p=MA.findIndex(x=>x.id===m.actieId);
+    let show=true,dim=false,hi=false;
+    if(k<MA.length){ if(p>k) show=false; else if(p<k) dim=true; else hi=true; }
+    if(!show) return '';
+    const kl=dim?'#9aa0a6':markerKleur(m.actieId);
+    const selCls=pgSel===m.id?' sel':'';
+    const lbl=pgShowLabels?`<span class="pg-mlbl">${esc(pgActieLabel(a))}</span>`:'';
+    if(m.vorm==='rect'){
+      return `<div class="pg-m pg-rect${selCls}${hi?' hi':''}${dim?' dim':''}" data-id="${m.id}" style="left:${m.x*100}%;top:${m.y*100}%;width:${(m.w||0)*100}%;height:${(m.h||0)*100}%;transform:rotate(${m.rot||0}deg);--c:${kl};background:${pgRgba(kl,.26)}" onmousedown="pgMarkerDown(event,'${m.id}')">${lbl}<span class="pg-handle pg-rot" onmousedown="pgRotateDown(event,'${m.id}')"></span><span class="pg-handle pg-rs" onmousedown="pgResizeDown(event,'${m.id}')"></span></div>`;
+    }
+    return `<div class="pg-m pg-pin${selCls}${hi?' hi':''}${dim?' dim':''}" data-id="${m.id}" style="left:${m.x*100}%;top:${m.y*100}%;--c:${kl}" onmousedown="pgMarkerDown(event,'${m.id}')"><span class="pg-dot"></span>${lbl}</div>`;
+  }).join('');
+}
+function pgStageDown(e){
+  const ov=document.getElementById('pg-overlay'); if(!ov) return;
+  if(pgTool==='pin'){
+    if(!pgActieSel){ toast('Kies eerst een actie'); return; }
+    const p=pgNorm(e,ov); state.plattegrond=state.plattegrond||[];
+    const m={id:uid(),actieId:pgActieSel,vorm:'pin',x:p.x,y:p.y}; state.plattegrond.push(m); pgSel=m.id; pgScrub=-1; save(); render(); return;
+  }
+  if(pgTool==='rect'){
+    if(!pgActieSel){ toast('Kies eerst een actie'); return; }
+    const start=pgNorm(e,ov);
+    const ghost=document.createElement('div'); ghost.className='pg-ghost'; ov.appendChild(ghost);
+    const mv=ev=>{ const c=pgNorm(ev,ov); const x=Math.min(start.x,c.x),y=Math.min(start.y,c.y),w=Math.abs(c.x-start.x),h=Math.abs(c.y-start.y);
+      ghost.style.left=(x*100)+'%';ghost.style.top=(y*100)+'%';ghost.style.width=(w*100)+'%';ghost.style.height=(h*100)+'%'; };
+    const up=ev=>{ document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+      const c=pgNorm(ev,ov); const x=Math.min(start.x,c.x),y=Math.min(start.y,c.y),w=Math.abs(c.x-start.x),h=Math.abs(c.y-start.y); ghost.remove();
+      if(w<0.01||h<0.01) return;
+      state.plattegrond=state.plattegrond||[]; const m={id:uid(),actieId:pgActieSel,vorm:'rect',x,y,w,h,rot:0}; state.plattegrond.push(m); pgSel=m.id; pgScrub=-1; save(); render(); };
+    document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up); e.preventDefault(); return;
+  }
+  pgSel=null; paintMarkers();
+}
+function pgMarkerDown(e,id){
+  if(pgTool!=='select') return;
+  e.stopPropagation();
+  const ov=document.getElementById('pg-overlay'); const m=(state.plattegrond||[]).find(x=>x.id===id); if(!m) return;
+  pgSel=id; const start=pgNorm(e,ov); const o={x:m.x,y:m.y}; let moved=false;
+  const mv=ev=>{ const c=pgNorm(ev,ov); m.x=Math.min(1,Math.max(0,o.x+(c.x-start.x))); m.y=Math.min(1,Math.max(0,o.y+(c.y-start.y))); moved=true; paintMarkers(); };
+  const up=ev=>{ document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up); if(moved) save(); else paintMarkers(); };
+  document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up); e.preventDefault();
+}
+function pgResizeDown(e,id){
+  e.stopPropagation(); if(pgTool!=='select') return;
+  const ov=document.getElementById('pg-overlay'); const m=(state.plattegrond||[]).find(x=>x.id===id); if(!m) return;
+  pgSel=id; const rad=(-(m.rot||0))*Math.PI/180, cos=Math.cos(rad), sin=Math.sin(rad);
+  const mv=ev=>{ const r=ov.getBoundingClientRect();
+    const cxp=(m.x+m.w/2)*r.width, cyp=(m.y+m.h/2)*r.height;
+    const vx=(ev.clientX-r.left)-cxp, vy=(ev.clientY-r.top)-cyp;
+    const lx=vx*cos - vy*sin, ly=vx*sin + vy*cos;
+    const hw=Math.max(8,Math.abs(lx)), hh=Math.max(8,Math.abs(ly));
+    m.w=Math.min(1,2*hw/r.width); m.h=Math.min(1,2*hh/r.height);
+    m.x=Math.max(0,(cxp-hw)/r.width); m.y=Math.max(0,(cyp-hh)/r.height); paintMarkers(); };
+  const up=()=>{ document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up); save(); };
+  document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up); e.preventDefault();
+}
+function pgRotateDown(e,id){
+  e.stopPropagation(); if(pgTool!=='select') return;
+  const ov=document.getElementById('pg-overlay'); const m=(state.plattegrond||[]).find(x=>x.id===id); if(!m) return;
+  pgSel=id;
+  const mv=ev=>{ const r=ov.getBoundingClientRect();
+    const cxp=(m.x+m.w/2)*r.width, cyp=(m.y+m.h/2)*r.height;
+    let ang=Math.atan2((ev.clientY-r.top)-cyp,(ev.clientX-r.left)-cxp)*180/Math.PI+90;
+    if(ev.shiftKey) ang=Math.round(ang/15)*15;
+    m.rot=Math.round(ang); paintMarkers(); };
+  const up=()=>{ document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up); save(); };
+  document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up); e.preventDefault();
+}
+function pgSetTool(t){ pgTool=t; pgSel=null; render(); }
+function pgOnScrub(v){ pgScrub=+v; const MA=markerActies(); const lbl=document.getElementById('pg-scrublbl'); if(lbl) lbl.textContent = pgScrub>=MA.length?'Alles tonen':(pgScrub+1)+'/'+MA.length+' · '+pgActieLabel(MA[pgScrub]); paintMarkers(); }
+function pgSelectMarker(id){ pgSel=id; pgTool='select'; render(); }
+function pgDelMarker(id){ state.plattegrond=(state.plattegrond||[]).filter(m=>m.id!==id); if(pgSel===id) pgSel=null; save(); render(); }
+function pgAddType(){ pgEnsureTypes().push({id:uid(),naam:'Nieuw type',kleur:'#cccccc'}); save(); render(); }
+function pgTypeColor(id,v){ const t=pgEnsureTypes().find(x=>x.id===id); if(t){ t.kleur=v; save(); paintMarkers(); } }
+function pgTypeName(id,v){ const t=pgEnsureTypes().find(x=>x.id===id); if(t){ t.naam=v; save(); } }
+function pgDelType(id){ if(!confirm('Type verwijderen? Leveranciers met dit type verliezen hun kleur.')) return; state.leverancierTypes=pgEnsureTypes().filter(t=>t.id!==id); (state.leveranciers||[]).forEach(l=>{ if(l.type===id) l.type=''; }); save(); render(); }
+
 /* ---- leverancier ---- */
 function levModal(id){
   const l = id?levById(id):{};
   const mwOpts = `<option value="">— geen —</option>`+state.medewerkers.map(m=>`<option value="${m.id}" ${l.verantwoordelijkeId===m.id?'selected':''}>${esc(m.naam)}${m.verantwoordelijkheid?' ('+esc(m.verantwoordelijkheid)+')':''}</option>`).join('');
+  const typeOpts = `<option value="">— geen type —</option>`+levTypes().map(t=>`<option value="${t.id}" ${l.type===t.id?'selected':''}>${esc(t.naam)}</option>`).join('');
   openModal(`
     <div class="mhead"><h3>${id?'Leverancier bewerken':'Nieuwe leverancier'}</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="mbody">
@@ -808,6 +1044,8 @@ function levModal(id){
       </div>
       <div class="field"><label>Verantwoordelijke (Grensrock)</label><select id="f_verant">${mwOpts}</select>
         <span class="muted" style="font-size:11px">Beheer namen via tab “Medewerkers”.</span></div>
+      <div class="field"><label>Type (kleur op plattegrond)</label><select id="f_type">${typeOpts}</select>
+        <span class="muted" style="font-size:11px">Bepaalt de kleur van de markers op de plattegrond. Beheer types via tab “Plattegrond”.</span></div>
     </div>
     <div class="mfoot">
       <button class="btn ghost" onclick="closeModal()">Annuleren</button>
@@ -819,7 +1057,7 @@ function saveLev(id){
   if(!v('f_ond')){ toast('Onderwerp is verplicht'); return; }
   const obj={onderwerp:v('f_ond'),firma:v('f_firma'),straat:v('f_straat'),stad:v('f_stad'),
     telefoon:v('f_tel'),gsm:v('f_gsm'),email:v('f_email'),contact:v('f_contact'),contactGsm:v('f_cgsm'),
-    verantwoordelijkeId:$('#f_verant').value};
+    verantwoordelijkeId:$('#f_verant').value, type:$('#f_type').value};
   if(id){ Object.assign(levById(id),obj); }
   else { obj.id=uid(); state.leveranciers.push(obj); openLev[obj.id]=true; }
   save(); closeModal(); render(); toast('Leverancier bewaard');
