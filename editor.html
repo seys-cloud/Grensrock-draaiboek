@@ -137,6 +137,8 @@ th.sortable:hover{color:var(--magenta)}
 .rt-edit:focus{outline:none;border-color:var(--magenta);box-shadow:0 0 0 3px rgba(255,43,214,.15)}
 .rt-edit:empty:before{content:attr(data-ph);color:var(--muted)}
 .rt-edit ul,.rt-edit ol,.rt-content ul,.rt-content ol{margin:.3em 0;padding-left:1.4em}
+.rt-edit .chk-line,.rt-content .chk-line{position:relative;padding-right:26px}
+.rt-edit .chk-line::after,.rt-content .chk-line::after{content:"";position:absolute;right:2px;top:50%;transform:translateY(-50%);width:16px;height:16px;border:2px solid currentColor;border-radius:4px;opacity:.5}
 .actie .txt.rt-content{white-space:normal}
 /* inline afbeeldingen in rich-text */
 .rt-edit img,.rt-content img{max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line);vertical-align:top}
@@ -512,8 +514,21 @@ function render(){
 
 /* ===================== VIEW: OPBOUW (leveranciers + acties) ===================== */
 let openLev = {};
+let opbouwSort='onderwerp';
+function setOpbouwSort(k){ opbouwSort=k; render(); }
+function rtCheckLine(){
+  const ed=document.getElementById('a_tekst'); if(!ed) return; ed.focus();
+  const sel=window.getSelection(); if(!sel.rangeCount) return;
+  try{ document.execCommand('formatBlock',false,'div'); }catch(e){}
+  const r=window.getSelection().getRangeAt(0);
+  let blocks=[...ed.querySelectorAll('div,p,li')].filter(b=>{ try{ return r.intersectsNode(b); }catch(e){ return false; } });
+  blocks=blocks.filter(b=>!blocks.some(x=>x!==b&&b.contains(x)));
+  if(!blocks.length){ const d=document.createElement('div'); d.className='chk-line'; while(ed.firstChild) d.appendChild(ed.firstChild); ed.appendChild(d); }
+  else { const allOn=blocks.every(b=>b.classList.contains('chk-line')); blocks.forEach(b=>b.classList.toggle('chk-line',!allOn)); }
+}
 function viewOpbouw(){
-  const list = state.leveranciers.slice().sort((a,b)=>(a.onderwerp||a.firma||'').localeCompare(b.onderwerp||b.firma||''));
+  const _k = opbouwSort==='firma' ? (l=>(l.firma||l.onderwerp||'')) : (l=>(l.onderwerp||l.firma||''));
+  const list = state.leveranciers.slice().sort((a,b)=>_k(a).localeCompare(_k(b),'nl',{sensitivity:'base'}));
   let body;
   if(!list.length){
     body = `<div class="empty">Nog geen leveranciers. Voeg je eerste leverancier toe om acties te kunnen plannen.</div>`;
@@ -525,7 +540,7 @@ function viewOpbouw(){
         <div class="lev-head" onclick="toggleLev('${l.id}')">
           <span class="chev">${SVG.chev}</span>
           <div>
-            <div class="nm">${esc(l.onderwerp||'—')} <span class="muted" style="font-weight:600">· ${esc(l.firma||'')}</span></div>
+            <div class="nm">${esc((opbouwSort==='firma'?l.firma:l.onderwerp)||'—')} <span class="muted" style="font-weight:600">· ${esc((opbouwSort==='firma'?l.onderwerp:l.firma)||'')}</span></div>
             <div class="sub">${esc([l.stad,l.contact].filter(Boolean).join(' · '))||'&nbsp;'}</div>
           </div>
           <span class="count">${acts.length} actie${acts.length===1?'':'s'}</span>
@@ -545,6 +560,11 @@ function viewOpbouw(){
     <div class="viewhead">
       <div><h2>Leveranciers &amp; acties</h2><div class="sub">Klik een leverancier open om acties toe te voegen of te bewerken.</div></div>
       <div class="spacer"></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-right:10px">
+        <span class="muted" style="font-size:12px">Sorteer:</span>
+        <button class="btn sm ${opbouwSort==='onderwerp'?'primary':''}" onclick="setOpbouwSort('onderwerp')">Onderwerp</button>
+        <button class="btn sm ${opbouwSort==='firma'?'primary':''}" onclick="setOpbouwSort('firma')">Firma</button>
+      </div>
       <button class="btn primary" onclick="levModal()">+ Nieuwe leverancier</button>
     </div>
     ${body}
@@ -1114,6 +1134,8 @@ function actieModal(levId,actId){
           <span class="rt-sep"></span>
           <button type="button" class="rt-btn" onmousedown="event.preventDefault()" onclick="rtCmd('removeFormat')" title="Opmaak wissen">Opmaak wissen</button>
           <span class="rt-sep"></span>
+          <button type="button" class="rt-btn" onmousedown="event.preventDefault()" onclick="rtCheckLine()" title="Afvinkbare regel(s): vierkantje rechts op de geselecteerde regels">&#9744; Afvinkbaar</button>
+          <span class="rt-sep"></span>
           <button type="button" class="rt-btn" onmousedown="event.preventDefault()" onclick="document.getElementById('a_imgin').click()" title="Afbeelding invoegen">&#128247; Afbeelding</button>
         </div>
         <div id="a_tekst" class="rt-edit" contenteditable="true" data-ph="Vrije tekst: bestelling, aandachtspunten, ..."></div>
@@ -1374,6 +1396,8 @@ body{font-family:'Gilroy',system-ui,sans-serif;color:#141416;font-size:10.5pt;li
 .p-sec{ font-size:11.5pt;font-weight:800;margin:0 0 3mm;color:#e0179c }
 .p-txt{ font-size:10.5pt;line-height:1.5 }
 .rt-content ul,.rt-content ol{ margin:.3em 0;padding-left:1.4em }
+.rt-content .chk-line{ position:relative;padding-right:7mm }
+.rt-content .chk-line::after{ content:"";position:absolute;right:1mm;top:.4mm;width:4mm;height:4mm;border:.4mm solid #555;border-radius:1mm }
 .rt-content img{ max-width:100%;height:auto;border-radius:6px;margin:3mm 0;display:inline-block;break-inside:avoid }
 .rt-content img.rt-img.is-s{ width:25% }.rt-content img.rt-img.is-m{ width:50% }.rt-content img.rt-img.is-l{ width:75% }.rt-content img.rt-img.is-full{ width:100% }
 .p-cover{ position:relative;height:297mm;width:210mm;overflow:hidden;color:#fff;background:radial-gradient(120% 90% at 82% -8%, #ff2bd6 0%, rgba(255,43,214,0) 42%),radial-gradient(120% 90% at -8% 108%, #34d6ff 0%, rgba(52,214,255,0) 42%),linear-gradient(135deg,#0c0c0e,#1a0a18 55%,#0c0c0e) }
