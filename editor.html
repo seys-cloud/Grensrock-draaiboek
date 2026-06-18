@@ -293,6 +293,9 @@ const DAGEN = [
 const DAGKLEUR = ["#34d6ff","#27e06a","#b6ff1a","#f2ff1a","#ffd11a","#ff9a1f",
                   "#ff5a1f","#ff2bd6","#c850ff","#7d8cff","#34d6ff","#27e06a"];
 const dagIndex = d => DAGEN.indexOf(d);
+const DAG_DATUM = {"Zaterdag (week voor)":"20/06/2026","Zondag (week voor)":"21/06/2026","Maandag (voor)":"22/06/2026","Dinsdag (voor)":"23/06/2026","Woensdag (voor)":"24/06/2026","Donderdag (voor)":"25/06/2026","Vrijdag (festival)":"26/06/2026","Zaterdag (festival)":"27/06/2026","Zondag (festival)":"28/06/2026","Maandag (na)":"29/06/2026","Dinsdag (na)":"30/06/2026","Woensdag (na)":"01/07/2026"};
+function onDagChange(){ const d=$('#a_dag').value, dt=DAG_DATUM[d]; if(dt) $('#a_datum').value=dt; }
+function onTijdSel(){ const sel=$('#a_tijdsel'), inp=$('#a_tijd'); if(!sel||!inp) return; if(sel.value==='__custom__'){ inp.classList.remove('hidden'); inp.focus(); } else { inp.value=sel.value; inp.classList.add('hidden'); } }
 
 /* Standaard leveranciertypes (kleur per type) — bewerkbaar via tab Plattegrond */
 const DEFAULT_LEVTYPES = [
@@ -428,15 +431,17 @@ function actiesVan(levId){ return state.acties.filter(a=>a.leverancierId===levId
 /* tijdstip -> sorteerwaarde (minuten); tekstuele dagdelen krijgen een ruwe waarde */
 function tijdKey(t){
   t=(t||'').toLowerCase().trim();
+  if(!t) return 100000;
+  if(/hele dag|ganse dag|^dag$/.test(t)) return -1;        /* hele dag eerst */
+  if(/voormiddag|^vm\b/.test(t)) return 7*60-0.5;          /* net voor 07u */
+  if(/namiddag|^nm\b/.test(t)) return 12*60-0.5;           /* net voor 12u */
+  if(/avond/.test(t)) return 18*60-0.5;                    /* net voor 18u */
   let m=t.match(/(\d{1,2})\s*[:hu.]\s*(\d{2})/); if(m) return (+m[1])*60+(+m[2]);
-  m=t.match(/^(\d{1,2})\s*[hu]$/); if(m) return (+m[1])*60;
-  if(/ochtend|morgen/.test(t)) return 8*60;
-  if(/voormiddag|vm\b/.test(t)) return 9*60;
-  if(/middag/.test(t)&&!/na/.test(t)) return 12*60;
-  if(/namiddag|nm\b/.test(t)) return 14*60;
-  if(/avond/.test(t)) return 19*60;
+  m=t.match(/^(\d{1,2})\s*[hu]?$/); if(m) return (+m[1])*60;
+  if(/ochtend|morgen/.test(t)) return 7*60-0.5;
+  if(/middag/.test(t)) return 12*60;
   if(/nacht/.test(t)) return 23*60;
-  if(/dag/.test(t)) return 11*60;
+  if(/dag/.test(t)) return -1;
   return 9000;
 }
 function cmpActie(a,b){
@@ -1109,9 +1114,9 @@ function actieModal(levId,actId){
     <div class="mbody">
       <div class="muted" style="font-size:13px;margin-top:-4px">Leverancier: <strong style="color:var(--txt)">${esc(l.onderwerp)}</strong> · ${esc(l.firma||'')}</div>
       <div class="row3">
-        <div class="field"><label>Dag *</label><select id="a_dag">${dagOpts}</select></div>
+        <div class="field"><label>Dag *</label><select id="a_dag" onchange="onDagChange()">${dagOpts}</select></div>
         <div class="field"><label>Datum</label><input id="a_datum" type="text" value="${esc(a.datum||'')}" placeholder="dd/mm/jjjj"></div>
-        <div class="field"><label>Tijdstip</label><input id="a_tijd" type="text" value="${esc(a.tijdstip||'')}" placeholder="bv. 13:00"></div>
+        <div class="field"><label>Tijdstip</label>${(()=>{const std=['dag','voormiddag','namiddag','avond'].concat(Array.from({length:24},(_,h)=>(h<10?'0'+h:h)+':00'));const cur=a.tijdstip||'';const isStd=std.includes(cur);return `<select id="a_tijdsel" onchange="onTijdSel()"><option value="">— tijdstip —</option>${std.map(v=>`<option value="${v}" ${cur===v?'selected':''}>${v}</option>`).join('')}<option value="__custom__" ${(cur&&!isStd)?'selected':''}>Ander uur…</option></select><input id="a_tijd" type="text" value="${esc(cur)}" placeholder="bv. 13:37" class="${(cur&&!isStd)?'':'hidden'}" style="margin-top:6px">`;})()}</div>
       </div>
       <div class="row2">
         <div class="field"><label>Locatie van levering</label><input id="a_lev" type="text" value="${esc(a.locLeveren||'')}" placeholder="waar te leveren"></div>
@@ -1147,6 +1152,7 @@ function actieModal(levId,actId){
       <button class="btn primary" onclick="saveActie('${levId}','${actId||''}')">Bewaren</button>
     </div>`);
   $('#a_dag').value=a.dag||'';
+  if(!$('#a_datum').value){ const _dt=DAG_DATUM[a.dag||'']; if(_dt) $('#a_datum').value=_dt; }
   let _html=a.tekst||'';
   if(a.img){ _html += (_html?'<br>':'') + '<img class="rt-img is-m" src="'+a.img+'">'; }
   $('#a_tekst').innerHTML=_html;
@@ -1487,6 +1493,8 @@ const SVG={
 /* ===================== START ===================== */
 $('#ed').addEventListener('change',e=>{ state.editie=e.target.value.trim(); save(); });
 initSeq();
+/* PDF-export print-CSS niet globaal laten lekken (dark-mode zwart-op-zwart fix) */
+window.addEventListener('afterprint',function(){ var r=document.getElementById('printroot'); if(r) r.innerHTML=''; var p=document.getElementById('pdfsrc'); if(p) p.innerHTML=''; });
 function applyTheme(t){ document.body.classList.toggle('light', t==='light'); const b=document.getElementById('themebtn'); if(b) b.textContent=(t==='light')?'☀︎':'☾'; }
 function toggleTheme(){ const nx=document.body.classList.contains('light')?'dark':'light'; try{localStorage.setItem('gr_editor_theme',nx);}catch(e){} applyTheme(nx); }
 (function(){ let t='dark'; try{ t=localStorage.getItem('gr_editor_theme')||'dark'; }catch(e){} applyTheme(t); })();
