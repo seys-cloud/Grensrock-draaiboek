@@ -524,12 +524,20 @@ function setOpbouwSort(k){ opbouwSort=k; render(); }
 function rtCheckLine(){
   const ed=document.getElementById('a_tekst'); if(!ed) return; ed.focus();
   const sel=window.getSelection(); if(!sel.rangeCount) return;
-  try{ document.execCommand('formatBlock',false,'div'); }catch(e){}
-  const r=window.getSelection().getRangeAt(0);
-  let blocks=[...ed.querySelectorAll('div,p,li')].filter(b=>{ try{ return r.intersectsNode(b); }catch(e){ return false; } });
-  blocks=blocks.filter(b=>!blocks.some(x=>x!==b&&b.contains(x)));
-  if(!blocks.length){ const d=document.createElement('div'); d.className='chk-line'; while(ed.firstChild) d.appendChild(ed.firstChild); ed.appendChild(d); }
-  else { const allOn=blocks.every(b=>b.classList.contains('chk-line')); blocks.forEach(b=>b.classList.toggle('chk-line',!allOn)); }
+  const collect=()=>{ const r=window.getSelection().getRangeAt(0);
+    let bl=[...ed.querySelectorAll('li,div,p')].filter(b=>{ try{ return r.intersectsNode(b); }catch(e){ return false; } });
+    return bl.filter(b=>!bl.some(x=>x!==b&&b.contains(x))); };
+  let blocks=collect();
+  /* Enkel een blok-element forceren als de selectie nog in kale tekst staat.
+     NIET formatBlock'en binnen lijsten -> dat splitst <ol> (nummering terug op 1)
+     en breekt het eerste <li>. */
+  if(!blocks.length){
+    try{ document.execCommand('formatBlock',false,'div'); }catch(e){}
+    blocks=collect();
+  }
+  if(!blocks.length){ const d=document.createElement('div'); d.className='chk-line'; while(ed.firstChild) d.appendChild(ed.firstChild); ed.appendChild(d); return; }
+  const allOn=blocks.every(b=>b.classList.contains('chk-line'));
+  blocks.forEach(b=>b.classList.toggle('chk-line',!allOn));
 }
 function viewOpbouw(){
   const _k = opbouwSort==='firma' ? (l=>(l.firma||l.onderwerp||'')) : (l=>(l.onderwerp||l.firma||''));
