@@ -39,6 +39,22 @@ const DAGKLEUR=["#34d6ff","#27e06a","#b6ff1a","#f2ff1a","#ffd11a","#ff9a1f","#ff
 const dagIndex=d=>DAGEN.indexOf(d);
 const dagKort=d=>(d||'').replace(/\s*\(.*\)/,'').trim();
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function sanitizeHtml(html){
+  if(!html) return '';
+  const tpl=document.createElement('template'); tpl.innerHTML=html;
+  const BAD=/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|LINK|META|BASE)$/;
+  (function walk(node){
+    [...node.children].forEach(el=>{
+      if(BAD.test(el.tagName)){ el.remove(); return; }
+      [...el.attributes].forEach(at=>{
+        const n=at.name.toLowerCase(), v=(at.value||'').replace(/\s+/g,'').toLowerCase();
+        if(n.startsWith('on')||((n==='href'||n==='src')&&(v.startsWith('javascript:')||v.startsWith('vbscript:')))) el.removeAttribute(at.name);
+      });
+      walk(el);
+    });
+  })(tpl.content);
+  return tpl.innerHTML;
+}
 function tijdKey(t){
   t=(t||'').toLowerCase().trim();
   if(!t) return 100000;
@@ -176,7 +192,7 @@ function renderAll(pub){
       <div class="ch"><span class="b" style="background:${col}">${esc(dagKort(a.dag))}</span><span class="t">${esc(a.datum||'')} · ${esc(a.tijdstip||'')}</span><button class="act-chk" title="Hele actie afvinken (enkel op dit toestel)" onclick="toggleActChk('${a.id}')"></button></div>
       <div class="h">${esc(l.onderwerp||'')} <span class="f">· ${esc(l.firma||'')}</span></div>
       <div class="m">${ev?'👤 '+esc(ev.naam):''}${loc?(ev?' · ':'')+esc(loc):''}</div>
-      ${a.tekst?`<div class="x">${a.tekst}</div>`:''}
+      ${a.tekst?`<div class="x">${sanitizeHtml(a.tekst)}</div>`:''}
       ${a.img?`<img src="${a.img}" alt="" loading="lazy">`:''}
     </div>`;
   });
@@ -244,7 +260,7 @@ fetch(SUPABASE_URL+'/rest/v1/publicatie?id=eq.1&select=data,editie,gepubliceerd_
     if(!rows||!rows.length){ secs.preview.innerHTML='<div class="note">Er is nog niets gepubliceerd. Publiceer eerst vanuit de editor.</div>'; return; }
     renderAll(rows[0]);
   })
-  .catch(e=>{ console.warn(e); secs.preview.innerHTML='<div class="note">Kan de gegevens niet laden.<br>Controleer je internetverbinding en herlaad de pagina.</div>'; });
+  .catch(e=>{ console.warn(e); secs.preview.innerHTML='<div class="note">Kan de gegevens niet laden.<br>Controleer je internetverbinding.<br><br><button onclick="location.reload()" style="padding:10px 18px;border:none;border-radius:9px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer">Opnieuw proberen</button></div>'; });
 
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
 

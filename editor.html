@@ -206,7 +206,7 @@ table.matrix.aw-table th{min-width:34px}
   <h2>Draaiboek bewerken</h2>
   <p>Aanmelden vereist</p>
   <div class="err" id="lg_err">Onjuist e-mailadres of wachtwoord.</div>
-  <input type="email" id="lg_email" placeholder="E-mailadres" autocomplete="username">
+  <input type="email" id="lg_email" placeholder="E-mailadres" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
   <input type="password" id="lg_pass" placeholder="Wachtwoord" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
   <button id="lg_btn" onclick="doLogin()">Aanmelden</button>
 </div></div>
@@ -345,6 +345,10 @@ async function idbSet(k,v){ try{ const d=await _db(); await new Promise(res=>{ c
 /* ---------- Supabase cloud-opslag ---------- */
 const SUPABASE_URL='https://xsavpdiupaxikzuqesul.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzYXZwZGl1cGF4aWt6dXFlc3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1ODg3OTUsImV4cCI6MjA5NjE2NDc5NX0.Poi3JG8WMmrwJKXIZ1SMq8Omc3RBqLD03GpUUZdcLmQ';
+if(!window.supabase||!window.supabase.createClient){
+  document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center;font-family:system-ui,sans-serif;color:#f4f4f6;background:#0c0c0e"><div><h2 style="margin:0 0 8px">Kon een onderdeel niet laden</h2><p style="color:#9b9ba6">De database-bibliotheek (supabase-js) kon niet geladen worden.<br>Controleer je internetverbinding en probeer opnieuw.</p><button onclick="location.reload()" style="margin-top:14px;padding:11px 20px;border:none;border-radius:9px;background:#ff2bd6;color:#12001c;font-weight:800;cursor:pointer">Opnieuw proberen</button></div></div>';
+  throw new Error('supabase-js niet geladen (CDN onbereikbaar?)');
+}
 const sbc = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let userEmail='';
 const SECTIES=['meta','bands','leveranciers','medewerkers','acties','aanwezig','veiligheidsImgs'];
@@ -367,7 +371,7 @@ function setSync(st){
   else if(st==='pending'){ el.textContent='☁︎ Opslaan…'; el.style.color='var(--muted)'; }
   else { el.textContent='⚠ Niet opgeslagen'; el.style.color='var(--orange)'; }
 }
-let _syncT=null,_syncBusy=false,_dirty=false,_needRender=false;
+let _syncT=null,_syncBusy=false,_dirty=false,_needRender=false,_syncFails=0;
 function save(){ _dirty=true; setSync('pending'); clearTimeout(_syncT); _syncT=setTimeout(syncNow,700); }
 async function syncNow(){
   if(_syncBusy||!userEmail) return;
@@ -389,8 +393,11 @@ async function syncNow(){
       }
       secVer[s]=ver+1; lastPushed[s]=json;
     }
+    _syncFails=0;
     if(_dirty){ save(); } else setSync('ok');
-  }catch(e){ console.warn('sync',e); setSync('error'); toast('Opslaan in de cloud mislukt — geen verbinding?'); }
+  }catch(e){ console.warn('sync',e); _dirty=true; _syncFails++; setSync('error');
+    if(_syncFails<=2) toast('Opslaan in de cloud mislukt — geen verbinding? Nieuwe poging volgt automatisch.');
+    clearTimeout(_syncT); _syncT=setTimeout(syncNow, Math.min(30000, 5000*_syncFails)); }
   _syncBusy=false;
 }
 function forcePushAll(){ lastPushed={}; save(); }
@@ -405,9 +412,32 @@ function scheduleRender(){
   render();
 }
 setInterval(()=>{ if(_needRender&&!_userIsBezig()){ _needRender=false; render(); } },4000);
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&_dirty){ clearTimeout(_syncT); syncNow(); } });
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'&&_dirty){ clearTimeout(_syncT); syncNow(); }
+  if(document.visibilityState==='visible'&&userEmail){ refetchAll(); if(_dirty) syncNow(); }
+});
+window.addEventListener('online',()=>{ if(_dirty) syncNow(); });
+window.addEventListener('beforeunload',e=>{ if(_dirty||_syncBusy){ e.preventDefault(); e.returnValue=''; } });
+async function refetchAll(){
+  try{
+    const {data:rows,error}=await sbc.from('draaiboek').select('sectie,data,versie');
+    if(error||!rows) return;
+    let changed=false;
+    rows.forEach(r=>{
+      if((r.versie||0)>(secVer[r.sectie]||0)){
+        secVer[r.sectie]=r.versie; sectieToState(r.sectie,r.data);
+        lastPushed[r.sectie]=JSON.stringify(stateToSectie(r.sectie)); changed=true;
+      }
+    });
+    if(changed) scheduleRender();
+  }catch(e){ console.warn('refetch',e); }
+}
+let _rtChannel=null,_rtRetryT=null,_rtGen=0;
 function startRealtime(){
-  sbc.channel('draaiboek-sync')
+  const gen=++_rtGen;
+  clearTimeout(_rtRetryT);
+  if(_rtChannel){ try{ sbc.removeChannel(_rtChannel); }catch(e){} _rtChannel=null; }
+  _rtChannel=sbc.channel('draaiboek-sync-'+gen)
     .on('postgres_changes',{event:'*',schema:'public',table:'draaiboek'},p=>{
       const row=p.new; if(!row||!row.sectie) return;
       if((row.versie||0)<=(secVer[row.sectie]||0)) return;
@@ -416,12 +446,35 @@ function startRealtime(){
       lastPushed[row.sectie]=JSON.stringify(stateToSectie(row.sectie));
       scheduleRender();
     })
-    .subscribe();
+    .subscribe(status=>{
+      if(gen!==_rtGen) return;
+      if(status==='SUBSCRIBED'){ refetchAll(); }
+      else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+        clearTimeout(_rtRetryT); _rtRetryT=setTimeout(startRealtime,8000);
+      }
+    });
 }
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* HTML uit contenteditable/plakacties opschonen vóór het in de gedeelde database gaat */
+function sanitizeHtml(html){
+  if(!html) return '';
+  const tpl=document.createElement('template'); tpl.innerHTML=html;
+  const BAD=/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|LINK|META|BASE)$/;
+  (function walk(node){
+    [...node.children].forEach(el=>{
+      if(BAD.test(el.tagName)){ el.remove(); return; }
+      [...el.attributes].forEach(at=>{
+        const n=at.name.toLowerCase(), v=(at.value||'').replace(/\s+/g,'').toLowerCase();
+        if(n.startsWith('on')||((n==='href'||n==='src')&&(v.startsWith('javascript:')||v.startsWith('vbscript:')))) el.removeAttribute(at.name);
+      });
+      walk(el);
+    });
+  })(tpl.content);
+  return tpl.innerHTML;
+}
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
 function levById(id){ return state.leveranciers.find(l=>l.id===id); }
 function mwById(id){ return state.medewerkers.find(m=>m.id===id); }
@@ -755,7 +808,7 @@ function viewProgramma(){
       <h3 style="margin-bottom:6px">Voorwoord — veiligheid</h3>
       <div class="sub" style="margin-bottom:10px">Verschijnt als voorwoord in de PDF. Gebruik de werkbalk voor opmaak; <b>Tab</b> springt in.</div>
       <div class="rt-toolbar">${rtToolbar()}</div>
-      <div id="vw_edit" class="rt-edit" style="min-height:280px" contenteditable="true" data-ph="Voorwoord…" onblur="state.voorwoord=this.innerHTML;save()">${textToHtml(state.voorwoord||'')}</div>
+      <div id="vw_edit" class="rt-edit" style="min-height:280px" contenteditable="true" data-ph="Voorwoord…" onblur="state.voorwoord=sanitizeHtml(this.innerHTML);save()">${textToHtml(state.voorwoord||'')}</div>
     </div>
     <div class="card">
       <h3 style="margin-bottom:6px">Veiligheidsplan</h3>
@@ -925,7 +978,7 @@ function viewPlattegrond(){
   .pg-li{display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line)}
   .pg-li.sel{background:rgba(255,43,214,.12);border-radius:6px}
   .pg-li-txt{flex:1;font-size:13px}
-  .pg-dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;border:1px solid rgba(255,255,255,.4)}
+  .pg-li .pg-dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;border:1px solid rgba(255,255,255,.4)}
   .pg-type{display:flex;gap:8px;align-items:center;margin-bottom:6px}
   .pg-type input[type=text]{flex:1}
   @media(max-width:800px){.pg-cols{grid-template-columns:1fr}}
@@ -1060,6 +1113,7 @@ function pgDelType(id){ if(!confirm('Type verwijderen? Leveranciers met dit type
 /* ---- leverancier ---- */
 function levModal(id){
   const l = id?levById(id):{};
+  if(!l){ toast('Deze leverancier bestaat niet meer (net door iemand anders verwijderd?)'); render(); return; }
   const mwOpts = `<option value="">— geen —</option>`+state.medewerkers.map(m=>`<option value="${m.id}" ${l.verantwoordelijkeId===m.id?'selected':''}>${esc(m.naam)}${m.verantwoordelijkheid?' ('+esc(m.verantwoordelijkheid)+')':''}</option>`).join('');
   const typeOpts = `<option value="">— geen type —</option>`+levTypes().map(t=>`<option value="${t.id}" ${l.type===t.id?'selected':''}>${esc(t.naam)}</option>`).join('');
   openModal(`
@@ -1098,15 +1152,18 @@ function saveLev(id){
   const obj={onderwerp:v('f_ond'),firma:v('f_firma'),straat:v('f_straat'),stad:v('f_stad'),
     telefoon:v('f_tel'),gsm:v('f_gsm'),email:v('f_email'),contact:v('f_contact'),contactGsm:v('f_cgsm'),
     verantwoordelijkeId:$('#f_verant').value, type:$('#f_type').value};
-  if(id){ Object.assign(levById(id),obj); }
+  if(id){ const l=levById(id); if(!l){ toast('Leverancier bestaat niet meer — niets bewaard'); closeModal(); render(); return; } Object.assign(l,obj); }
   else { obj.id=uid(); state.leveranciers.push(obj); openLev[obj.id]=true; }
   save(); closeModal(); render(); toast('Leverancier bewaard');
 }
 function delLev(id){
-  const l=levById(id); const n=actiesVan(id).length;
+  const l=levById(id); if(!l){ render(); return; }
+  const n=actiesVan(id).length;
   if(!confirm(`Leverancier “${l.onderwerp}” verwijderen?${n?` Dit verwijdert ook ${n} actie(s).`:''}`)) return;
+  const weg=new Set(state.acties.filter(a=>a.leverancierId===id).map(a=>a.id));
   state.leveranciers=state.leveranciers.filter(x=>x.id!==id);
   state.acties=state.acties.filter(a=>a.leverancierId!==id);
+  state.plattegrond=(state.plattegrond||[]).filter(m=>!weg.has(m.actieId));
   save(); render(); toast('Verwijderd');
 }
 
@@ -1114,8 +1171,9 @@ function delLev(id){
 let tmpImg=null;
 function actieModal(levId,actId){
   const a = actId?state.acties.find(x=>x.id===actId):{leverancierId:levId};
-  tmpImg = a.img||null;
   const l=levById(levId);
+  if(!a||!l){ toast('Deze actie of leverancier bestaat niet meer (net door iemand anders verwijderd?)'); render(); return; }
+  tmpImg = a.img||null;
   const dagOpts=`<option value="">— kies dag —</option>`+DAGEN.map(d=>`<option value="${esc(d)}" ${a.dag===d?'selected':''}>${esc(d)}</option>`).join('');
   openModal(`
     <div class="mhead"><h3>${actId?'Actie bewerken':'Nieuwe actie'}</h3><button class="x" onclick="closeModal()">×</button></div>
@@ -1223,8 +1281,11 @@ function pickImg(ev){
 function resizeImg(dataUrl,maxDim,q,cb){
   const im=new Image();
   im.onload=()=>{ let{width:w,height:h}=im; const s=Math.min(1,maxDim/Math.max(w,h)); w=Math.round(w*s); h=Math.round(h*s);
-    const c=document.createElement('canvas'); c.width=w;c.height=h; c.getContext('2d').drawImage(im,0,0,w,h);
+    const c=document.createElement('canvas'); c.width=w;c.height=h; const ctx=c.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); /* transparante PNG wordt anders zwart in JPEG */
+    ctx.drawImage(im,0,0,w,h);
     cb(c.toDataURL('image/jpeg',q)); };
+  im.onerror=()=>{ toast('Afbeelding kon niet gelezen worden — gebruik JPG of PNG (geen HEIC)'); };
   im.src=dataUrl;
 }
 function addVeilImg(ev){
@@ -1241,16 +1302,16 @@ function delVeilImg(i){ state.veiligheidsImgs.splice(i,1); save(); render(); }
 function saveActie(levId,actId){
   const dag=$('#a_dag').value;
   if(!dag){ toast('Kies een dag'); return; }
-  let tekst=$('#a_tekst').innerHTML.trim();
+  let tekst=sanitizeHtml($('#a_tekst').innerHTML).trim();
   if(/^(<br\s*\/?>)*$/i.test(tekst)) tekst='';
   const obj={leverancierId:levId,dag,datum:$('#a_datum').value.trim(),tijdstip:$('#a_tijd').value.trim(),
     locLeveren:$('#a_lev').value.trim(),locAfhalen:$('#a_afh').value.trim(),
     verantwoordelijkeId:$('#a_verant').value,tekst,img:null};
-  if(actId){ Object.assign(state.acties.find(x=>x.id===actId),obj); }
+  if(actId){ const a=state.acties.find(x=>x.id===actId); if(!a){ toast('Actie bestaat niet meer — niets bewaard'); closeModal(); render(); return; } Object.assign(a,obj); }
   else { obj.id=uid(); obj.seq=(state.acties.reduce((mx,x)=>Math.max(mx,x.seq||0),0))+1; state.acties.push(obj); }
   openLev[levId]=true; save(); closeModal(); render(); toast('Actie bewaard');
 }
-function delActie(id){ if(!confirm('Deze actie verwijderen?'))return; state.acties=state.acties.filter(a=>a.id!==id); save(); render(); toast('Verwijderd'); }
+function delActie(id){ if(!confirm('Deze actie verwijderen?'))return; state.acties=state.acties.filter(a=>a.id!==id); state.plattegrond=(state.plattegrond||[]).filter(m=>m.actieId!==id); save(); render(); toast('Verwijderd'); }
 
 /* ---- medewerker ---- */
 function mwModal(id){
@@ -1279,12 +1340,14 @@ function saveMw(id){
   const naam=$('#m_naam').value.trim();
   if(!naam){ toast('Naam is verplicht'); return; }
   const obj={rol:$('#m_rol').value,naam,verantwoordelijkheid:$('#m_vrw').value.trim(),gsm:$('#m_gsm').value.trim(),email:$('#m_email').value.trim()};
-  if(id) Object.assign(mwById(id),obj); else { obj.id=uid(); state.medewerkers.push(obj); }
+  if(id){ const m=mwById(id); if(!m){ toast('Medewerker bestaat niet meer — niets bewaard'); closeModal(); render(); return; } Object.assign(m,obj); } else { obj.id=uid(); state.medewerkers.push(obj); }
   save(); closeModal(); render(); toast('Medewerker bewaard');
 }
 function delMw(id){ if(!confirm('Medewerker verwijderen?'))return;
   state.medewerkers=state.medewerkers.filter(m=>m.id!==id);
   state.leveranciers.forEach(l=>{ if(l.verantwoordelijkeId===id) l.verantwoordelijkeId=''; });
+  state.acties.forEach(a=>{ if(a.verantwoordelijkeId===id) a.verantwoordelijkeId=''; });
+  if(state.aanwezig) delete state.aanwezig[id];
   save(); render(); toast('Verwijderd'); }
 
 /* ---- bands ---- */
@@ -1305,7 +1368,9 @@ function doImport(ev){
   const f=ev.target.files[0]; if(!f)return;
   const r=new FileReader();
   r.onload=async ()=>{ try{ const d=JSON.parse(r.result);
-      if(!d.leveranciers||!d.acties) throw 0;
+      if(!Array.isArray(d.leveranciers)||!Array.isArray(d.acties)) throw 0;
+      ['bands','medewerkers','veiligheidsImgs','plattegrond','leverancierTypes'].forEach(k=>{ if(d[k]!=null&&!Array.isArray(d[k])) delete d[k]; });
+      if(d.aanwezig!=null&&(typeof d.aanwezig!=='object'||Array.isArray(d.aanwezig))) delete d.aanwezig;
       if(!confirm('Huidige gegevens vervangen door het ge\u00EFmporteerde bestand? Dit geldt meteen voor IEDEREEN.')) return;
       state=Object.assign(defaultState(),d); openLev={}; initSeq();
       try{ await migrateImagesInState(); }catch(e){ console.warn(e); toast('Niet alle afbeeldingen konden ge\u00FCpload worden'); }
@@ -1474,6 +1539,8 @@ async function makePDF(){
   state.editie=$('#ed').value.trim(); save();
   $('#pdfsrc').innerHTML = buildPrintHTML();
   const root=$('#printroot'); root.innerHTML='';
+  toast('PDF opbouwen…');
+  try{ await Promise.allSettled([...document.querySelectorAll('#pdfsrc img')].map(im=>im.decode?im.decode():Promise.resolve())); }catch(e){}
   try{
     if(!window.PagedModule || !PagedModule.Previewer) throw new Error('paged ontbreekt');
     const url=URL.createObjectURL(new Blob([PRINTCSS],{type:'text/css'}));
@@ -1520,6 +1587,12 @@ async function doLogin(){
   boot();
 }
 async function doLogout(){ try{ await sbc.auth.signOut(); }catch(e){} location.reload(); }
+sbc.auth.onAuthStateChange((ev,session)=>{
+  if(ev==='SIGNED_OUT'||(!session&&ev==='TOKEN_REFRESHED')){
+    userEmail=''; _booted=false;
+    const o=document.getElementById('loginoverlay'); if(o) o.style.display='flex';
+  }
+});
 
 document.addEventListener('keydown',function(e){
   if(e.key==='Tab' && e.target && e.target.classList && e.target.classList.contains('rt-edit')){
@@ -1564,7 +1637,11 @@ async function boot(){
   userEmail=session.user.email||'';
   document.getElementById('loginoverlay').style.display='none';
   const {data:rows,error}=await sbc.from('draaiboek').select('sectie,data,versie');
-  if(error){ console.warn(error); toast('Laden uit de cloud mislukt — herlaad de pagina'); return; }
+  if(error){
+    console.warn(error); _booted=false;
+    $('#main').innerHTML='<div class="view"><div class="empty">Laden uit de cloud mislukt — controleer je internetverbinding.<br><br><button class="btn primary" onclick="boot()">Opnieuw proberen</button></div></div>';
+    return;
+  }
   if(!rows||!rows.length){ await migrate(); }
   else{
     state=defaultState();
